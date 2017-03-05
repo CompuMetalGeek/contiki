@@ -1,0 +1,1 @@
+sudo make TARGET=zoul BUILD=remote-reva hello-world.upload clean;
