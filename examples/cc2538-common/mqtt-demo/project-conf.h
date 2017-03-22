@@ -41,7 +41,7 @@
 #define PROJECT_CONF_H_
 /*---------------------------------------------------------------------------*/
 /* User configuration */
-#define MQTT_DEMO_STATUS_LED      LEDS_GREEN
+#define MQTT_DEMO_STATUS_LED      LEDS_RED
 #define MQTT_DEMO_PUBLISH_TRIGGER &button_right_sensor
 
 /* If undefined, the demo will attempt to connect to IBM's quickstart */
