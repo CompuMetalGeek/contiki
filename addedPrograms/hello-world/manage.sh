@@ -2,41 +2,47 @@
 set -e
 
 # defaults
-defaultParams="cru";
+defaultParams="cmru";
+defaultProject="hello-world";
+defaultTarget="zoul";
+defaultBoard="remote-reva";
 
 # read parameters
 for var in "$@";
 do
 	if [[ $var = -* ]];
 		then params="$params${var:1}";
-	fi;
-	if [[ $var = target\=* ]];
+	elif [[ $var = target\=* ]];
 		then target=${var:7};
-	fi;
-	if [[ $var = build\=* ]];
+	elif [[ $var = build\=* ]];
 		then build=${var:6};
+	else
+		project=$var;
 	fi;
 done;
 
 # apply defaults if neccesary
+board=${board:-$defaultBoard};
 params=${params:-$defaultParams};
+project=${project:-$defaultProject};
+target=${target:-$defaultTarget};
+arguments="";
 
 if [[ $params =~ "c" ]];
-	then echo "--- cleaning project ---";
-	sudo make TARGET=zoul BUILD=remote-reva hello-world clean;
-	echo "--- done. ---";
+	then echo "--- clean ---";
+	arguments="$arguments clean";
 fi;
 if [[ $params =~ "m" ]];
-	then echo "--- making project ---";
-	sudo make TARGET=zoul BUILD=remote-reva hello-world;
-	echo "--- done. ---";
+	then echo "--- make ---";
+	arguments="$arguments $project";
 fi;
 if [[ $params =~ "u" ]];
-	then echo "--- uploading project ---";
-	sudo make TARGET=zoul BUILD=remote-reva hello-world.upload;
-	echo "--- done. ---";
+	then echo "--- upload ---";
+	arguments="${arguments}.upload";
 fi;
 if [[ $params =~ "r" ]];
-	then echo "--- reading from device \(via putty\) ---";
-	sudo putty -load re-mote;
+	then echo "--- read ---";
+	arguments="$arguments login";
 fi;
+
+sudo make TARGET=$target BOARD=$board $arguments;
