@@ -26,8 +26,10 @@
 
 #define BUFSIZE 2000
 #define DEBUG_LINE_MARKER '\r'
+#define IPV6_VERSION_MASK (char)0xFF
+#define IPV6_VERSION_CHAR (char)0x60
 #define MIN_DEVMTU 1500
-#define WIRESHARK_IMPORT_FORMAT 1
+//#define WIRESHARK_IMPORT_FORMAT 1
 
 #define SLIP_END      0300
 #define SLIP_ESC      0333
@@ -41,6 +43,8 @@ int slip_end=0;
 int slip_begin=0;
 int timestamp=0;
 int verbose=0;
+
+int slipfd = 0, tunfd=0, socketfd=0;
 
 /* prints the current time*/
 void
@@ -186,15 +190,18 @@ slip_flushbuf(int fd)
 void
 cleanup(void)
 {
+	close(slipfd);
+	close(tunfd);
 	printf("exiting program\n");
+	exit(0);
 }
 
 /* cleanup on exit by signal */
 void
 sigcleanup(int signal)
 {
-	printf("got signal, ");
-	exit(0);
+	printf("got signal %d", signal);
+	cleanup();
 }
 
 /* Read from serial, write to tunnel.  */
@@ -239,7 +246,25 @@ serial_to_tun(FILE *inslip, int outfd)
 				printf("command request received: %s\n",uip.inbuf);
 			} else if(uip.inbuf[0] == DEBUG_LINE_MARKER) { /* SLIP debug line, print buffer to stdout */
 				fwrite(uip.inbuf + 1, inbufptr - 1, 1, stdout);
+			} else if(uip.inbuf[0] == IPV6_VERSION_CHAR){
+				printf("IPv6 packet received:\n");
+				if(verbose>4){
+					#if WIRESHARK_IMPORT_FORMAT
+						printf("0000");
+						for(i = 0; i < inbufptr; i++) printf(" %02x",uip.inbuf[i]);
+					#else
+						printf("         ");
+						for(i = 0; i < inbufptr; i++) {
+							printf("%02x", uip.inbuf[i]);
+							if((i & 3) == 3) printf(" ");
+							if((i & 15) == 15) printf("\n         ");
+						}
+					#endif
+					printf("\n");
+				}
+			
 			} else { /* normal packet */
+				printf("\n\n%x\n\n",uip.inbuf[0]);
 				if(verbose>2) { /* write some info about packet */
 					if (timestamp) stamptime();
 					printf("Packet from SLIP of length %d.\n", inbufptr);
@@ -354,7 +379,6 @@ write_to_serial(int outfd, void *inbuf, int len)
 	}
 
 	slip_send(outfd, SLIP_END); /* append real end of message */
-
 }
 
 /* Read from tunnel, write to serial. */
@@ -372,12 +396,36 @@ tun_to_serial(int infd, int outfd)
 	return size;
 }
 
+void
+start_server(int socket_type,int *socketfd, const char* TCP_address, struct sockaddr_in *server_address){
+	*socketfd = socket(AF_INET, SOCK_STREAM, 0);
+	if(*socketfd<0){
+		err(1, "cannot open TCP-socket");
+	}
+	printf("opened socket\n");
+	memset(server_address,0,sizeof(*server_address));
+	int port = htons(atoi(TCP_address));
+	(*server_address).sin_family = AF_INET;
+	(*server_address).sin_addr.s_addr = INADDR_ANY;
+	(*server_address).sin_port = port;
+	if(bind(*socketfd,(struct sockaddr *) server_address, sizeof(*server_address))<0){
+		err(1, "cannot bind to port %s",TCP_address);
+	}
+	printf("bound to port\n");
+	listen(*socketfd,1);
+	printf("started listening\n");
+}
+
 int
 main(int argc, char **argv)
 {
 	int baudrate = -2;
 	int devmtu = MIN_DEVMTU;
-	int slipfd = 0, tunfd=0;
+	int socket_type=0, is_server=-1;
+
+	struct sockaddr_in server_address, client_address;
+
+	const char *TCP_address = NULL;
 	const char *siodev = NULL;
 	const char *host = NULL;
 	const char *port = NULL;
@@ -390,7 +438,7 @@ main(int argc, char **argv)
 	setvbuf(stdout, NULL, _IOLBF, 0); /* Line buffered output. */
 
 	/* process arguments */
-	while((c = getopt(argc, argv, "B:M:Ls:a:p:v::h")) != -1) {
+	while((c = getopt(argc, argv, "B:M:LSCT:s:a:p:v::h")) != -1) {
 		switch(c) {
 			case 'B':
 			baudrate = atoi(optarg);
@@ -427,20 +475,37 @@ main(int argc, char **argv)
 			if (optarg) verbose = atoi(optarg);
 			break;
 
+			case 'S':
+			is_server = 1;
+			break;
+
+			case 'C':
+			is_server = 0;
+			break;
+
+			case 'T':
+			TCP_address = optarg;
+			break;
+
 			case '?':
 			case 'h':
 			default:
 			fprintf(stderr,"usage:  %s [options]\n", prog);
 			fprintf(stderr,"example: tunslip6 -L -v -s ttyUSB1\n");
 			fprintf(stderr,"Options are:\n");
+			fprintf(stderr," -a SLIP-serveraddr  \n");
+			fprintf(stderr," -p SLIP-serverport  \n");
 			fprintf(stderr," -B baudrate    9600,19200,38400,57600,115200 (default),230400,460800,921600\n");
 			fprintf(stderr," -L             Log output format (adds time stamps)\n");
 			fprintf(stderr," -s siodev      Serial device (default /dev/ttyUSB0)\n");
 			fprintf(stderr," -M             Interface MTU (default and min: 1280)\n");
 			fprintf(stderr," -v [level]     Be verbose, level can be between 0 and 5\n");
 			fprintf(stderr,"                when no level is defined, defaults to level 2\n");
-			fprintf(stderr," -a serveraddr  \n");
-			fprintf(stderr," -p serverport  \n");
+			fprintf(stderr," -S             Start this endpoint as a server for the SLIP-tunnel.\n");
+			fprintf(stderr," -C             Start this endpoint as a client for the SLIP-tunnel.\n");
+			fprintf(stderr," -T address     When endpoint is a client, specifies the address of the \n");
+			fprintf(stderr,"                server-endpoint (IP-address:port), when endpoint is a server,\n");
+			fprintf(stderr,"                specifies the port to listen to (port).\n");
 			exit(1);
 			break;
 		}
@@ -533,7 +598,67 @@ main(int argc, char **argv)
 
 
 	/* TODO: start real tunneling service, currently just echoes every message to stdout */
-	tunfd = STDOUT_FILENO;
+	if(is_server==-1){
+		err(1,"Server or client role not set");
+		tunfd = STDOUT_FILENO;
+	}else if(TCP_address==NULL){
+		err(1,"address not set");
+	}
+	else if(is_server){
+		/* setup TCP server and listen for connection of other end*/
+		printf("server: %s\n",TCP_address);
+		start_server(socket_type, &socketfd, TCP_address, &server_address);
+		int length = sizeof(client_address);
+
+		printf("waiting for connection\n");
+		tunfd = accept(socketfd, (struct sockaddr *) &client_address, &(length));
+		printf("accepted connection\n");
+	} else {
+		/* setup TCP client and try to connect to server*/
+		printf("client: %s\n",TCP_address);
+		char * separator = strchr(TCP_address,':');
+		int separator_position = (int)(separator - TCP_address);
+		char address[separator_position+1];
+		memcpy(address,TCP_address,separator_position);
+		address[separator_position] = '\0' ;
+		char * port = (separator+1);
+		/* create client socket and get server info via getaddrinfo */
+		printf("Client trying to connect to: %s:%s\n", address, port);
+		struct addrinfo hints, *servinfo, *p;
+
+		memset(&hints, 0, sizeof hints);
+		hints.ai_family = AF_UNSPEC;
+		hints.ai_socktype = SOCK_STREAM;
+
+		int rv;
+		/* get all possible server info about host and port */
+		if((rv = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
+			err(1, "getaddrinfo: %s", gai_strerror(rv));
+		}
+		/* loop through all the results and connect to the first we can */
+		for(p = servinfo; p != NULL; p = p->ai_next) {
+			if((tunfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+				perror("client: socket");
+				continue;
+			}
+			if(connect(tunfd, p->ai_addr, p->ai_addrlen) == -1) {
+				close(tunfd);
+				perror("client: connect");
+				continue;
+			}
+			break;
+		}
+		/* tried all services returned by getaddrinfo but failed to connect */
+		if(p == NULL) {
+			err(1, "can't connect to ``%s:%s''", host, port);
+		}
+
+		printf("Client connected");
+		/* all done with this structure */
+		freeaddrinfo(servinfo);
+
+
+	}
 
 	/* set signaling functions */
 	atexit(cleanup);

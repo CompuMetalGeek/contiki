@@ -91,6 +91,10 @@
 
 #include <string.h>
 
+#ifdef UIP_SLIP_DUPLICATION
+#include <dev/slip.h>
+#endif
+
 /*---------------------------------------------------------------------------*/
 /* For Debug, logging, statistics                                            */
 /*---------------------------------------------------------------------------*/
@@ -1219,6 +1223,11 @@ uip_process(uint8_t flag)
   /* TBD Some Parameter problem messages */
   if(!uip_ds6_is_my_addr(&UIP_IP_BUF->destipaddr) &&
      !uip_ds6_is_my_maddr(&UIP_IP_BUF->destipaddr)) {
+
+    #ifdef UIP_SLIP_DUPLICATION
+      slip_send();
+    #endif
+
     if(!uip_is_addr_mcast(&UIP_IP_BUF->destipaddr) &&
        !uip_is_addr_linklocal(&UIP_IP_BUF->destipaddr) &&
        !uip_is_addr_linklocal(&UIP_IP_BUF->srcipaddr) &&
@@ -2313,6 +2322,9 @@ uip_process(uint8_t flag)
   UIP_STAT(++uip_stat.ip.sent);
   /* Return and let the caller do the actual transmission. */
   uip_flags = 0;
+  #ifdef UIP_SLIP_DUPLICATION
+    slip_send();
+  #endif
   return;
 
   drop:
@@ -2356,6 +2368,10 @@ uip_send(const void *data, int len)
         memcpy(uip_sappdata, (data), uip_slen);
       }
     }
+    printf("uip_send\n");
+    #ifdef UIP_SLIP_DUPLICATION
+      slip_send();
+    #endif
   }
 }
 /*---------------------------------------------------------------------------*/

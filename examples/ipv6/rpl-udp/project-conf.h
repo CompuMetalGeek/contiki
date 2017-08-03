@@ -69,4 +69,8 @@
 #define RPL_CONF_MOP RPL_MOP_NON_STORING /* Mode of operation*/
 #endif /* WITH_NON_STORING */
 
+#ifndef UIP_SLIP_DUPLICATION
+#define UIP_SLIP_DUPLICATION 0
+#endif
+
 #endif
