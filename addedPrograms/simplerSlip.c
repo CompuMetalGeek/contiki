@@ -8,6 +8,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <sys/types.h>
 #include <termios.h>
 #include <time.h>
@@ -18,7 +19,7 @@
 #include <arpa/inet.h>
 #include <netdb.h>
 
-#include "../tools/tools-utils.h"
+#include "../tools/tools-utils.c"
 
 #ifndef BAUDRATE
 #define BAUDRATE B115200
@@ -29,7 +30,7 @@
 #define IPV6_VERSION_MASK (char)0xFF
 #define IPV6_VERSION_CHAR (char)0x60
 #define MIN_DEVMTU 1500
-//#define WIRESHARK_IMPORT_FORMAT 1
+// #define WIRESHARK_IMPORT_FORMAT 1
 
 #define SLIP_END      0300
 #define SLIP_ESC      0333
@@ -57,7 +58,7 @@ stamptime(void)
 	struct tm *tmp;
 	char timec[20];
 
-	gettimeofday(&tv, NULL) ;
+    gettimeofday(&tv, NULL);
 	msecs=tv.tv_usec/1000;
 	secs=tv.tv_sec;
 	if (startsecs) {
@@ -147,9 +148,9 @@ stty_telos(int fd)
 	if(tcflush(fd, TCIOFLUSH) == -1) err(1, "tcflush");
 }
 
-/* Add character to SLIP-buffer */
+/* Add character to SLIP-buffer, file descriptor is passed for readability of code but is not used in this method */
 void
-slip_send(int fd, unsigned char c)
+slip_send(unsigned char c)
 {
 	if(slip_end >= sizeof(slip_buf)) {
 		err(1, "slip_send overflow");
@@ -234,7 +235,7 @@ serial_to_tun(FILE *inslip, int outfd)
 		err(1, "serial_to_tun: read");
 	}
 	if(ret == 0) { /* end of packet*/
-		clearerr(inslip); /* reset input state */
+        clearerr(inslip); /* reset input state */
 		return; /* */
 	}
 	switch(c) { /* process byte */
@@ -262,6 +263,9 @@ serial_to_tun(FILE *inslip, int outfd)
 					#endif
 					printf("\n");
 				}
+                if(write(outfd, uip.inbuf, inbufptr) != inbufptr) { /* write packet to output file descriptor */
+                    err(1, "serial_to_tun: write");
+                }
 			
 			} else { /* normal packet */
 				printf("\n\n%x\n\n",uip.inbuf[0]);
@@ -338,7 +342,7 @@ serial_to_tun(FILE *inslip, int outfd)
 
 /* escapes special characters and does the actual writing */
 void
-write_to_serial(int outfd, void *inbuf, int len)
+write_to_serial(void *inbuf, int len)
 {
 	u_int8_t *p = inbuf;
 	int i;
@@ -365,25 +369,25 @@ write_to_serial(int outfd, void *inbuf, int len)
 	for(i = 0; i < len; i++) { /* add escape for special characters */
 		switch(p[i]) {
 			case SLIP_END:
-			slip_send(outfd, SLIP_ESC);
-			slip_send(outfd, SLIP_ESC_END);
+            slip_send(SLIP_ESC);
+            slip_send(SLIP_ESC_END);
 			break;
 			case SLIP_ESC:
-			slip_send(outfd, SLIP_ESC);
-			slip_send(outfd, SLIP_ESC_ESC);
+            slip_send(SLIP_ESC);
+            slip_send(SLIP_ESC_ESC);
 			break;
 			default:
-			slip_send(outfd, p[i]);
+            slip_send(p[i]);
 			break;
 		}
 	}
 
-	slip_send(outfd, SLIP_END); /* append real end of message */
+    slip_send(SLIP_END); /* append real end of message */
 }
 
 /* Read from tunnel, write to serial. */
 int
-tun_to_serial(int infd, int outfd)
+tun_to_serial(int infd)
 {
 	struct {
 		unsigned char inbuf[BUFSIZE];
@@ -392,28 +396,78 @@ tun_to_serial(int infd, int outfd)
 
 	if((size = read(infd, uip.inbuf, BUFSIZE)) == -1) err(1, "tun_to_serial: read");
 
-	write_to_serial(outfd, uip.inbuf, size);
+    write_to_serial(uip.inbuf, size);
 	return size;
 }
 
 void
-start_server(int socket_type,int *socketfd, const char* TCP_address, struct sockaddr_in *server_address){
-	*socketfd = socket(AF_INET, SOCK_STREAM, 0);
-	if(*socketfd<0){
-		err(1, "cannot open TCP-socket");
-	}
-	printf("opened socket\n");
-	memset(server_address,0,sizeof(*server_address));
-	int port = htons(atoi(TCP_address));
-	(*server_address).sin_family = AF_INET;
-	(*server_address).sin_addr.s_addr = INADDR_ANY;
-	(*server_address).sin_port = port;
-	if(bind(*socketfd,(struct sockaddr *) server_address, sizeof(*server_address))<0){
-		err(1, "cannot bind to port %s",TCP_address);
-	}
-	printf("bound to port\n");
-	listen(*socketfd,1);
-	printf("started listening\n");
+start_server(int socket_type, int *socketfd, const char* TCP_address, struct sockaddr_in *server_address){
+    /* AF_UNSPEC in this context means no preference for IPv4 or IPv6, default is currently IPv4 */
+    if(socket_type == AF_UNSPEC){
+        socket_type = AF_INET;
+    }
+    *socketfd = socket(socket_type, SOCK_STREAM, 0);
+    //fcntl(*socketfd, F_SETFL, O_NONBLOCK);
+
+    if(*socketfd<0){
+        err(1, "cannot open TCP-socket");
+    }
+    printf("opened socket\n");
+    memset(server_address,0,sizeof(*server_address));
+    int port = htons(atoi(TCP_address));
+    (*server_address).sin_family = AF_INET;
+    (*server_address).sin_addr.s_addr = INADDR_ANY;
+    (*server_address).sin_port = port;
+    if(bind(*socketfd,(struct sockaddr *) server_address, sizeof(*server_address))<0){
+        err(1, "cannot bind to port %s",TCP_address);
+    }
+    printf("bound to port\n");
+    listen(*socketfd,1);
+    printf("started listening\n");
+}
+
+void
+start_client(const char* TCP_address, const char* host){
+    char * separator = strchr(TCP_address,':');
+    int separator_position = (int)(separator - TCP_address);
+    char address[separator_position+1];
+    memcpy(address,TCP_address,separator_position);
+    address[separator_position] = '\0' ;
+    char * port = (separator+1);
+    /* create client socket and get server info via getaddrinfo */
+    printf("Client trying to connect to: %s:%s\n", address, port);
+    struct addrinfo hints, *servinfo, *p;
+
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    int rv;
+    /* get all possible server info about host and port */
+    if((rv = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
+        err(1, "getaddrinfo: %s", gai_strerror(rv));
+    }
+    /* loop through all the results and connect to the first we can */
+    for(p = servinfo; p != NULL; p = p->ai_next) {
+        if((tunfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            perror("client: socket");
+            continue;
+        }
+        if(connect(tunfd, p->ai_addr, p->ai_addrlen) == -1) {
+            close(tunfd);
+            perror("client: connect");
+            continue;
+        }
+        break;
+    }
+    /* tried all services returned by getaddrinfo but failed to connect */
+    if(p == NULL) {
+        err(1, "can't connect to ``%s:%s''", host, port);
+    }
+
+    printf("Client connected");
+    /* all done with this structure */
+    freeaddrinfo(servinfo);
 }
 
 int
@@ -421,7 +475,7 @@ main(int argc, char **argv)
 {
 	int baudrate = -2;
 	int devmtu = MIN_DEVMTU;
-	int socket_type=0, is_server=-1;
+    int socket_type = AF_UNSPEC, is_server = -1;
 
 	struct sockaddr_in server_address, client_address;
 
@@ -463,7 +517,7 @@ main(int argc, char **argv)
 			break;
 
 			case 'a':
-			host = optarg;
+            host = optarg;
 			break;
 
 			case 'p':
@@ -538,7 +592,7 @@ main(int argc, char **argv)
 		}
 		/* loop through all the results and connect to the first we can */
 		for(p = servinfo; p != NULL; p = p->ai_next) {
-			if((slipfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+            if((slipfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 				perror("client: socket");
 				continue;
 			}
@@ -591,7 +645,7 @@ main(int argc, char **argv)
 	}
 
 	/* start of communication */
-	slip_send(slipfd, SLIP_END);
+    slip_send(SLIP_END);
 	/* stream for reading */
 	inslip = fdopen(slipfd, "r");
 	if(inslip == NULL) err(1, "main: fdopen");
@@ -605,59 +659,18 @@ main(int argc, char **argv)
 		err(1,"address not set");
 	}
 	else if(is_server){
-		/* setup TCP server and listen for connection of other end*/
+        /* setup TCP server and listen for connection of other end */
 		printf("server: %s\n",TCP_address);
-		start_server(socket_type, &socketfd, TCP_address, &server_address);
+        start_server(socket_type, &socketfd, TCP_address, &server_address);
 		int length = sizeof(client_address);
 
 		printf("waiting for connection\n");
-		tunfd = accept(socketfd, (struct sockaddr *) &client_address, &(length));
+        tunfd = accept(socketfd, (struct sockaddr *) &client_address, &(length));
 		printf("accepted connection\n");
 	} else {
-		/* setup TCP client and try to connect to server*/
+        /* setup TCP client and try to connect to server */
 		printf("client: %s\n",TCP_address);
-		char * separator = strchr(TCP_address,':');
-		int separator_position = (int)(separator - TCP_address);
-		char address[separator_position+1];
-		memcpy(address,TCP_address,separator_position);
-		address[separator_position] = '\0' ;
-		char * port = (separator+1);
-		/* create client socket and get server info via getaddrinfo */
-		printf("Client trying to connect to: %s:%s\n", address, port);
-		struct addrinfo hints, *servinfo, *p;
-
-		memset(&hints, 0, sizeof hints);
-		hints.ai_family = AF_UNSPEC;
-		hints.ai_socktype = SOCK_STREAM;
-
-		int rv;
-		/* get all possible server info about host and port */
-		if((rv = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
-			err(1, "getaddrinfo: %s", gai_strerror(rv));
-		}
-		/* loop through all the results and connect to the first we can */
-		for(p = servinfo; p != NULL; p = p->ai_next) {
-			if((tunfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-				perror("client: socket");
-				continue;
-			}
-			if(connect(tunfd, p->ai_addr, p->ai_addrlen) == -1) {
-				close(tunfd);
-				perror("client: connect");
-				continue;
-			}
-			break;
-		}
-		/* tried all services returned by getaddrinfo but failed to connect */
-		if(p == NULL) {
-			err(1, "can't connect to ``%s:%s''", host, port);
-		}
-
-		printf("Client connected");
-		/* all done with this structure */
-		freeaddrinfo(servinfo);
-
-
+        start_client(TCP_address, host);
 	}
 
 	/* set signaling functions */
@@ -692,29 +705,32 @@ main(int argc, char **argv)
 		FD_SET(slipfd, &rset);	/* Read from slip ASAP! */
 		if(slipfd > maxfd) maxfd = slipfd; /* update maxfd if current fd is bigger */
 
-		/* We only have one packet at a time queued for slip output. */
+        /* We only have one packet at a time queued for slip output. */
 		if(slip_empty()) {
 			FD_SET(tunfd, &rset);
 			if(tunfd > maxfd) maxfd = tunfd;
 		}
 
-		ret = select(maxfd + 1, &rset, &wset, NULL, NULL);
+        ret = select(maxfd + 1, &rset, &wset, NULL, NULL);
+        /* Will continue to select the fd of the socket-connection (tunfd) for reading (&rset)
+         * if a zero-byte message has been sent to this socket
+         * this is expected behaviour
+         * TODO: check for closure of the socket */
 		
 		if(ret == -1 && errno != EINTR) {
 			err(1, "select");
 		} else if(ret > 0) {
 
 			if(FD_ISSET(slipfd, &rset)) { /* read from SLIP */
-				serial_to_tun(inslip, tunfd);
+                serial_to_tun(inslip, tunfd);
 			}
 
 			if(FD_ISSET(slipfd, &wset)) { /* write buffer to SLIP */
 				slip_flushbuf(slipfd);
 			}
 
-			int size;
 			if(slip_empty() && FD_ISSET(tunfd, &rset)) { /* write if buffer empty and read necessary from tunnel */
-				size=tun_to_serial(tunfd, slipfd);
+                tun_to_serial(tunfd); /* method can return an int with size of the data that was read from the tunnel */
 				slip_flushbuf(slipfd);
 			}
 		}
