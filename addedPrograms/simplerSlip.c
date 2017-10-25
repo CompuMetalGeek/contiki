@@ -40,12 +40,13 @@
 speed_t b_rate = BAUDRATE;
 
 unsigned char slip_buf[BUFSIZE];
-int slip_end=0;
-int slip_begin=0;
+unsigned int slip_end=0;
+unsigned int slip_begin=0;
 int timestamp=0;
 int verbose=0;
 
 int slipfd = 0, tunfd=0, socketfd=0;
+int is_server=-1;
 
 /* prints the current time*/
 void
@@ -193,6 +194,9 @@ cleanup(void)
 {
 	close(slipfd);
 	close(tunfd);
+    if(is_server){
+        close(socketfd);
+    }
 	printf("exiting program\n");
 	exit(0);
 }
@@ -213,7 +217,7 @@ serial_to_tun(FILE *inslip, int outfd)
 		unsigned char inbuf[BUFSIZE];
 	} uip;
 
-	static int inbufptr = 0;
+    static int inbufptr = 0;
 	int ret,i;
 	unsigned char c;
 
@@ -470,12 +474,27 @@ start_client(const char* TCP_address, const char* host){
     freeaddrinfo(servinfo);
 }
 
+void reconnect_server(struct sockaddr_in client_address){
+    /* server has to wait for client to reconnect, needs no extra setup because server is still listening on socketfd */
+    socklen_t length = sizeof(client_address);
+
+    printf("waiting for connection\n");
+    tunfd = accept(socketfd, (struct sockaddr *) &client_address, &length);
+    printf("accepted connection\n");
+}
+
+void
+reconnect_client (const char* TCP_address, const char* host){
+    /* client needs to reconnect to server, this has to be restarted completely */
+    start_client(TCP_address, host);
+}
+
 int
 main(int argc, char **argv)
 {
 	int baudrate = -2;
 	int devmtu = MIN_DEVMTU;
-    int socket_type = AF_UNSPEC, is_server = -1;
+    int socket_type = AF_UNSPEC;
 
 	struct sockaddr_in server_address, client_address;
 
@@ -651,7 +670,6 @@ main(int argc, char **argv)
 	if(inslip == NULL) err(1, "main: fdopen");
 
 
-	/* TODO: start real tunneling service, currently just echoes every message to stdout */
 	if(is_server==-1){
 		err(1,"Server or client role not set");
 		tunfd = STDOUT_FILENO;
@@ -662,7 +680,7 @@ main(int argc, char **argv)
         /* setup TCP server and listen for connection of other end */
 		printf("server: %s\n",TCP_address);
         start_server(socket_type, &socketfd, TCP_address, &server_address);
-		int length = sizeof(client_address);
+        __socklen_t length = sizeof(client_address);
 
 		printf("waiting for connection\n");
         tunfd = accept(socketfd, (struct sockaddr *) &client_address, &(length));
@@ -730,8 +748,18 @@ main(int argc, char **argv)
 			}
 
 			if(slip_empty() && FD_ISSET(tunfd, &rset)) { /* write if buffer empty and read necessary from tunnel */
-                tun_to_serial(tunfd); /* method can return an int with size of the data that was read from the tunnel */
-				slip_flushbuf(slipfd);
+                int size;
+                size = tun_to_serial(tunfd); /* method can return an int with size of the data that was read from the tunnel */
+                if(size==0){
+                    printf("Connection terminated, starting reconnect.\n");
+                    if(is_server){
+                        reconnect_server(client_address);
+                    } else {
+                        reconnect_client(TCP_address,host);
+                    }
+                } else {
+                    slip_flushbuf(slipfd);
+                }
 			}
 		}
 	}
