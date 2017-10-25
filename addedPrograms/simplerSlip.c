@@ -141,7 +141,7 @@ stty_telos(int fd)
 	if(tcsetattr(fd, TCSAFLUSH, &tty) == -1) err(1, "tcsetattr");
 
 	int i = TIOCM_DTR;
-	if(ioctl(fd, TIOCMBIS, &i) == -1) err(1, "ioctl"); /* flush data received but not read, and data written but not send */
+    if(ioctl(fd, TIOCMBIS, &i) == -1) err(1, "ioctl"); /* flush data received but not read, and data written but not send */
 
 	usleep(10*1000);		/* Wait for hardware 10ms. */
 
@@ -431,7 +431,7 @@ start_server(int socket_type, int *socketfd, const char* TCP_address, struct soc
 }
 
 void
-start_client(const char* TCP_address, const char* host){
+start_client_count(int trycount, const char* TCP_address, const char* host){
     char * separator = strchr(TCP_address,':');
     int separator_position = (int)(separator - TCP_address);
     char address[separator_position+1];
@@ -451,25 +451,35 @@ start_client(const char* TCP_address, const char* host){
     if((rv = getaddrinfo(address, port, &hints, &servinfo)) != 0) {
         err(1, "getaddrinfo: %s", gai_strerror(rv));
     }
-    /* loop through all the results and connect to the first we can */
-    for(p = servinfo; p != NULL; p = p->ai_next) {
-        if((tunfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
-            perror("client: socket");
-            continue;
+    int count = 0;
+    while(count<trycount){
+        /* loop through all the results and connect to the first we can */
+        for(p = servinfo; p != NULL; p = p->ai_next) {
+            if((tunfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
+                perror("client: socket");
+                continue;
+            }
+            if(connect(tunfd, p->ai_addr, p->ai_addrlen) == -1) {
+                close(tunfd);
+                perror("client: connect");
+                continue;
+            }
+            count=trycount;
+            break;
         }
-        if(connect(tunfd, p->ai_addr, p->ai_addrlen) == -1) {
-            close(tunfd);
-            perror("client: connect");
-            continue;
+        count++;
+        int sleepRemaining = usleep(5*1000*1000);/*wait 5 seconds to retry*/
+        if(sleepRemaining){
+            printf("did not sleep\n");
         }
-        break;
+
     }
     /* tried all services returned by getaddrinfo but failed to connect */
     if(p == NULL) {
         err(1, "can't connect to ``%s:%s''", host, port);
     }
 
-    printf("Client connected");
+    printf("Client connected\n");
     /* all done with this structure */
     freeaddrinfo(servinfo);
 }
@@ -484,9 +494,14 @@ void reconnect_server(struct sockaddr_in client_address){
 }
 
 void
+start_client(const char* TCP_address, const char* host){
+    start_client_count(1,TCP_address,host);
+}
+
+void
 reconnect_client (const char* TCP_address, const char* host){
-    /* client needs to reconnect to server, this has to be restarted completely */
-    start_client(TCP_address, host);
+    /* client tries 5 times to reconnect to server, this has to be restarted completely */
+    start_client_count(5,TCP_address, host);
 }
 
 int
