@@ -91,7 +91,7 @@
 
 #include <string.h>
 
-#ifdef UIP_SLIP_DUPLICATION
+#ifndef UIP_SLIP_DUPLICATION
 #define UIP_SLIP_DUPLICATION 0
 #endif /* UIP_SLIP_DUPLICATION */
 
@@ -1228,9 +1228,6 @@ uip_process(uint8_t flag)
     if(!uip_ds6_is_my_addr(&UIP_IP_BUF->destipaddr) &&
             !uip_ds6_is_my_maddr(&UIP_IP_BUF->destipaddr)) {
         
-#if UIP_SLIP_DUPLICATION
-        slip_send();
-#endif /* UIP_SLIP_DUPLICATION */
         
         if(!uip_is_addr_mcast(&UIP_IP_BUF->destipaddr) &&
                 !uip_is_addr_linklocal(&UIP_IP_BUF->destipaddr) &&
