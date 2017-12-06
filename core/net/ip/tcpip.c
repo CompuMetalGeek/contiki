@@ -54,6 +54,14 @@
 
 #include <string.h>
 
+#ifndef UIP_SLIP_DUPLICATION
+#define UIP_SLIP_DUPLICATION 0
+#endif /* UIP_SLIP_DUPLICATION */
+
+#if UIP_SLIP_DUPLICATION
+#include "dev/slip.h"
+#endif /* UIP_SLIP_DUPLICATION */
+
 #define DEBUG DEBUG_NONE
 #include "net/ip/uip-debug.h"
 
@@ -119,6 +127,11 @@ static uint8_t (* outputfunc)(const uip_lladdr_t *a);
 uint8_t
 tcpip_output(const uip_lladdr_t *a)
 {
+#if UIP_SLIP_DUPLICATION
+  PRINTF("uip_process: message sent\n");
+  slip_send();
+#endif /* UIP_SLIP_DUPLICATION */
+
   int ret;
   if(outputfunc != NULL) {
     ret = outputfunc(a);

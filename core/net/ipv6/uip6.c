@@ -91,13 +91,6 @@
 
 #include <string.h>
 
-#ifndef UIP_SLIP_DUPLICATION
-#define UIP_SLIP_DUPLICATION 0
-#endif /* UIP_SLIP_DUPLICATION */
-
-#if UIP_SLIP_DUPLICATION
-#include "dev/slip.h"
-#endif /* UIP_SLIP_DUPLICATION */
 
 /*---------------------------------------------------------------------------*/
 /* For Debug, logging, statistics                                            */
@@ -2323,9 +2316,7 @@ send:
     UIP_STAT(++uip_stat.ip.sent);
     /* Return and let the caller do the actual transmission. */
     uip_flags = 0;
-#if UIP_SLIP_DUPLICATION
-    slip_send();
-#endif /* UIP_SLIP_DUPLICATION */
+
     return;
     
 drop:
@@ -2370,9 +2361,6 @@ uip_send(const void *data, int len)
             }
         }
         printf("uip_send\n");
-#if UIP_SLIP_DUPLICATION
-        slip_send();
-#endif /* UIP_SLIP_DUPLICATION */
     }
 }
 /*---------------------------------------------------------------------------*/
