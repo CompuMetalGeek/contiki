@@ -210,6 +210,10 @@ dis_input(void)
   rpl_instance_t *instance;
   rpl_instance_t *end;
 
+  printf("RPL: Recieved a DIS from ");
+  uip_debug_ipaddr_print(&UIP_IP_BUF->srcipaddr);
+  printf("\n");
+
   /* DAG Information Solicitation */
   PRINTF("RPL: Received a DIS from ");
   PRINT6ADDR(&UIP_IP_BUF->srcipaddr);
@@ -268,6 +272,10 @@ dis_output(uip_ipaddr_t *addr)
     addr = &tmpaddr;
   }
 
+  printf("RPL: Sending a DIS to ");
+  uip_debug_ipaddr_print(addr);
+  printf("\n");
+
   PRINTF("RPL: Sending a DIS to ");
   PRINT6ADDR(addr);
   PRINTF("\n");
@@ -301,6 +309,11 @@ dio_input(void)
   uip_ipaddr_copy(&from, &UIP_IP_BUF->srcipaddr);
 
   /* DAG Information Object */
+
+  printf("RPL: Recieved a DIO from ");
+  uip_debug_ipaddr_print(&UIP_IP_BUF->srcipaddr);
+  printf("\n");
+
   PRINTF("RPL: Received a DIO from ");
   PRINT6ADDR(&from);
   PRINTF("\n");
@@ -468,6 +481,12 @@ dio_input(void)
 void
 dio_output(rpl_instance_t *instance, uip_ipaddr_t *uc_addr)
 {
+
+
+    printf("RPL: Sending a DIO to ");
+    uip_debug_ipaddr_print(uc_addr);
+    printf("\n");
+
   unsigned char *buffer;
   int pos;
   int is_root;
@@ -998,6 +1017,12 @@ dao_input(void)
   rpl_instance_t *instance;
   uint8_t instance_id;
 
+
+
+  printf("RPL: Recieved a DAO from ");
+  uip_debug_ipaddr_print(&UIP_IP_BUF->srcipaddr);
+  printf("\n");
+
   /* Destination Advertisement Object */
   PRINTF("RPL: Received a DAO from ");
   PRINT6ADDR(&UIP_IP_BUF->srcipaddr);
@@ -1221,6 +1246,15 @@ dao_output_target_seq(rpl_parent_t *parent, uip_ipaddr_t *prefix,
     /* Send DAO to root */
     dest_ipaddr = &parent->dag->dag_id;
   }
+
+  printf("RPL: Sending a %sDAO with sequence number %u, lifetime %u, prefix ",
+        lifetime == RPL_ZERO_LIFETIME ? "No-Path " : "", seq_no, lifetime);
+  uip_debug_ipaddr_print(prefix);
+  printf(" to ");
+  uip_debug_ipaddr_print(dest_ipaddr);
+  printf(" , parent ");
+  uip_debug_ipaddr_print(parent_ipaddr);
+  printf("\n");
 
   PRINTF("RPL: Sending a %sDAO with sequence number %u, lifetime %u, prefix ",
       lifetime == RPL_ZERO_LIFETIME ? "No-Path " : "", seq_no, lifetime);
